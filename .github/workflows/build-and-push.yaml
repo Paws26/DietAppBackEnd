@@ -1,0 +1,48 @@
+name: Build and Push Docker Image
+
+# Trigger on a push to the main branch
+on:
+  push:
+    branches: ['main']
+
+# Set environment variables
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }} 
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write 
+
+    steps:
+      # Download the code into the runner
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Log into the GitHub Container Registry
+      - name: Log into Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Generate tags
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: type=raw,value=latest,type=sha
+
+      # Build the image and push it to GHCR
+      - name: Build and push docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: . # Build Dockerfile in current directory
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
