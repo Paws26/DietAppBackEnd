@@ -1,7 +1,9 @@
 package com.diaetologie.diaetologenbe.dto;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.UUID;
+
 public class ZieleDTO {
     private UUID fallId;
     private String langfristigesZiel;
@@ -12,7 +14,9 @@ public class ZieleDTO {
     private BigDecimal zielFettaufnahme;
     private LocalDate zielDatum;
     private String status;
+
     public ZieleDTO() {}
+
     public UUID getFallId() { return fallId; }
     public void setFallId(UUID v) { this.fallId = v; }
     public String getLangfristigesZiel() { return langfristigesZiel; }

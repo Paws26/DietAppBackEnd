@@ -2,65 +2,64 @@ package com.diaetologie.diaetologenbe.controller;
 
 import com.diaetologie.diaetologenbe.entity.*;
 import com.diaetologie.diaetologenbe.respository.*;
-import com.diaetologie.diaetologenbe.service.GroqService;  // ← Ändere hier!
+import com.diaetologie.diaetologenbe.service.GroqService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.*;
 
 @RestController
 @RequestMapping("/api/ki")
 public class KiController {
 
-    private final GroqService groqService;  // ← Ändere hier!
+    private final GroqService groqService;
     private final PatientenfallRepository fallRepo;
     private final AssessmentKoerperRepository koerperRepo;
     private final AssessmentErnaehrungRepository ernaehrungRepo;
     private final DiagnoseRepository diagnoseRepo;
     private final AssessmentAllgemeinRepository allgemeinRepo;
     private final KiEntscheidungRepository kiRepo;
+    private final ZieleRepository zieleRepo;
+    private final MonitoringRepository monitoringRepo;
 
-    public KiController(GroqService groqService,  // ← Ändere hier!
+    public KiController(GroqService groqService,
                         PatientenfallRepository fallRepo,
                         AssessmentKoerperRepository koerperRepo,
                         AssessmentErnaehrungRepository ernaehrungRepo,
                         DiagnoseRepository diagnoseRepo,
                         AssessmentAllgemeinRepository allgemeinRepo,
-                        KiEntscheidungRepository kiRepo) {
-        this.groqService = groqService;  // ← Ändere hier!
+                        KiEntscheidungRepository kiRepo,
+                        ZieleRepository zieleRepo,
+                        MonitoringRepository monitoringRepo) {
+        this.groqService = groqService;
         this.fallRepo = fallRepo;
         this.koerperRepo = koerperRepo;
         this.ernaehrungRepo = ernaehrungRepo;
         this.diagnoseRepo = diagnoseRepo;
         this.allgemeinRepo = allgemeinRepo;
         this.kiRepo = kiRepo;
+        this.zieleRepo = zieleRepo;
+        this.monitoringRepo = monitoringRepo;
     }
 
+    // ── Assessment recommendation ────────────────────────────────────────────
     @PostMapping("/empfehlung/{fallId}")
     public ResponseEntity<?> empfehlung(@PathVariable UUID fallId) {
         try {
             Patientenfall fall = fallRepo.findById(fallId).orElseThrow();
 
-            List<AssessmentKoerper>    kl = koerperRepo.findByFallId(fallId);
-            List<AssessmentErnaehrung> el = ernaehrungRepo.findByFallId(fallId);
-            List<Diagnose>             dl = diagnoseRepo.findByFallId(fallId);
-            List<AssessmentAllgemein>  al = allgemeinRepo.findByFallId(fallId);
+            AssessmentKoerper k = first(koerperRepo.findByFallId(fallId));
+            AssessmentErnaehrung e = first(ernaehrungRepo.findByFallId(fallId));
+            Diagnose d = first(diagnoseRepo.findByFallId(fallId));
+            AssessmentAllgemein a = first(allgemeinRepo.findByFallId(fallId));
+            Ziele z = first(zieleRepo.findByFallId(fallId));
 
-            AssessmentKoerper    k = kl.isEmpty() ? null : kl.get(0);
-            AssessmentErnaehrung e = el.isEmpty() ? null : el.get(0);
-            Diagnose             d = dl.isEmpty() ? null : dl.get(0);
-            AssessmentAllgemein  a = al.isEmpty() ? null : al.get(0);
-
-            // Call Groq instead of Gemini
             String antwort = groqService.ernaehrungsempfehlung(
-                    k != null && k.getBmi() != null ? k.getBmi().doubleValue() : null,
-                    k != null && k.getFettmasse() != null ? k.getFettmasse().doubleValue() : null,
-                    k != null && k.getFettmasseIdealMax() != null ? k.getFettmasseIdealMax().doubleValue() : null,
+                    bd(k, "bmi"), bd(k, "fettmasse"), bd(k, "fettmasseIdealMax"),
                     k != null ? k.getBlutdruckSystolisch() : null,
                     k != null ? k.getBlutdruckDiastolisch() : null,
-                    e != null && e.getEnergiebedarfKcal() != null ? e.getEnergiebedarfKcal().doubleValue() : null,
-                    e != null && e.getKalorienaufnahme() != null ? e.getKalorienaufnahme().doubleValue() : null,
-                    e != null && e.getFettbedarfG() != null ? e.getFettbedarfG().doubleValue() : null,
-                    e != null && e.getFettaufnahme() != null ? e.getFettaufnahme().doubleValue() : null,
+                    bd(e, "energiebedarfKcal"), bd(e, "kalorienaufnahme"),
+                    bd(e, "fettbedarfG"), bd(e, "fettaufnahme"),
                     e != null ? e.getZuckergetraenke() : null,
                     e != null ? e.getAlkoholKonsum() : null,
                     e != null ? e.getFertigprodukteKonsum() : null,
@@ -69,41 +68,151 @@ public class KiController {
                     a != null ? a.getMotivationLevel() : null,
                     d != null ? d.getProblem() : null,
                     d != null ? d.getUrsache() : null,
-                    d != null ? d.getSymptom() : null
+                    d != null ? d.getSymptom() : null,
+                    z != null ? z.getLangfristigesZiel() : null,
+                    z != null ? z.getInterventionsziel() : null,
+                    z != null && z.getZielGewicht() != null
+                            ? z.getZielGewicht().doubleValue() : null,
+                    z != null && z.getZielFettmasse() != null
+                            ? z.getZielFettmasse().doubleValue() : null,
+                    z != null && z.getZielKalorien() != null
+                            ? z.getZielKalorien().doubleValue() : null,
+                    z != null && z.getZielFettaufnahme() != null
+                            ? z.getZielFettaufnahme().doubleValue() : null
             );
 
-            // Save to database
             KiEntscheidung ki = new KiEntscheidung();
             ki.setFall(fall);
-            ki.setEingabeJson("Klinische Daten für Fall: " + fallId);
+            ki.setTyp("assessment");
+            ki.setEingabeJson("Assessment-Empfehlung für Fall: " + fallId);
             ki.setAusgabeJson(antwort);
             kiRepo.save(ki);
 
             return ResponseEntity.ok(Map.of(
                     "empfehlung", antwort,
                     "gespeichert", true,
-                    "service", "Groq"
+                    "typ", "assessment"
             ));
         } catch (Exception ex) {
             ex.printStackTrace();
-            return ResponseEntity.internalServerError().body(Map.of("fehler", ex.getMessage()));
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("fehler", ex.getMessage()));
         }
     }
 
+    // ── Monitoring adaptation recommendation ────────────────────────────────
+    @PostMapping("/monitoring/{fallId}")
+    public ResponseEntity<?> monitoringAdaption(@PathVariable UUID fallId) {
+        try {
+            Patientenfall fall = fallRepo.findById(fallId).orElseThrow();
+
+            Ziele z = first(zieleRepo.findByFallId(fallId));
+            List<Monitoring> verlauf = monitoringRepo.findByFallIdOrderByDatumDesc(fallId);
+
+            if (verlauf.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("fehler", "Keine Monitoring-Daten vorhanden"));
+            }
+
+            Monitoring latest = verlauf.get(0);
+            Monitoring start = verlauf.get(verlauf.size() - 1);
+
+            String antwort = groqService.monitoringAdaption(
+                    z != null && z.getZielGewicht() != null
+                            ? z.getZielGewicht().doubleValue() : null,
+                    z != null && z.getZielFettmasse() != null
+                            ? z.getZielFettmasse().doubleValue() : null,
+                    z != null && z.getZielKalorien() != null
+                            ? z.getZielKalorien().doubleValue() : null,
+                    z != null && z.getZielFettaufnahme() != null
+                            ? z.getZielFettaufnahme().doubleValue() : null,
+                    z != null ? z.getInterventionsziel() : null,
+                    start.getGewicht() != null ? start.getGewicht().doubleValue() : null,
+                    start.getFettmasse() != null ? start.getFettmasse().doubleValue() : null,
+                    latest.getGewicht() != null ? latest.getGewicht().doubleValue() : null,
+                    latest.getFettmasse() != null ? latest.getFettmasse().doubleValue() : null,
+                    latest.getKalorienaufnahme() != null
+                            ? latest.getKalorienaufnahme().doubleValue() : null,
+                    latest.getFettaufnahme() != null
+                            ? latest.getFettaufnahme().doubleValue() : null,
+                    verlauf.size(),
+                    latest.getZielerreichung(),
+                    latest.getFoerderndefaktoren(),
+                    latest.getHemmendefaktoren()
+            );
+
+            KiEntscheidung ki = new KiEntscheidung();
+            ki.setFall(fall);
+            ki.setTyp("monitoring");
+            ki.setEingabeJson("Monitoring-Adaption für Fall: " + fallId);
+            ki.setAusgabeJson(antwort);
+            kiRepo.save(ki);
+
+            return ResponseEntity.ok(Map.of(
+                    "empfehlung", antwort,
+                    "gespeichert", true,
+                    "typ", "monitoring"
+            ));
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("fehler", ex.getMessage()));
+        }
+    }
+
+    // ── Get last ASSESSMENT recommendation only ──────────────────────────────
     @GetMapping("/fall/{fallId}")
     public ResponseEntity<?> letzteEmpfehlung(@PathVariable UUID fallId) {
-        List<KiEntscheidung> list = kiRepo.findByFallIdOrderByErstelltAmDesc(fallId);
+        List<KiEntscheidung> list =
+                kiRepo.findByFallIdAndTypOrderByErstelltAmDesc(fallId, "assessment");
         if (list.isEmpty()) {
-            return ResponseEntity.ok(Map.of("message", "Keine Empfehlungen für diesen Patienten"));
+            return ResponseEntity.ok(
+                    Map.of("message", "Keine Empfehlungen vorhanden"));
         }
+        KiEntscheidung latest = list.get(0);
         return ResponseEntity.ok(Map.of(
-                "empfehlung", list.get(0).getAusgabeJson(),
-                "erstelltAm", list.get(0).getErstelltAm().toString()
+                "empfehlung", latest.getAusgabeJson(),
+                "erstelltAm", latest.getErstelltAm().toString()
+        ));
+    }
+
+    // ── Get last MONITORING recommendation only ──────────────────────────────
+    @GetMapping("/monitoring/{fallId}/letzte")
+    public ResponseEntity<?> letzteMonitoringAdaption(@PathVariable UUID fallId) {
+        List<KiEntscheidung> list =
+                kiRepo.findByFallIdAndTypOrderByErstelltAmDesc(fallId, "monitoring");
+        if (list.isEmpty()) {
+            return ResponseEntity.ok(
+                    Map.of("message", "Keine Monitoring-Auswertung vorhanden"));
+        }
+        KiEntscheidung latest = list.get(0);
+        return ResponseEntity.ok(Map.of(
+                "empfehlung", latest.getAusgabeJson(),
+                "erstelltAm", latest.getErstelltAm().toString()
         ));
     }
 
     @GetMapping("/test")
     public ResponseEntity<?> test() {
-        return ResponseEntity.ok(Map.of("status", "working", "service", "Groq"));
+        return ResponseEntity.ok(Map.of("status", "ok", "service", "Groq"));
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    private <T> T first(List<T> list) {
+        return list == null || list.isEmpty() ? null : list.get(0);
+    }
+
+    private Double bd(Object entity, String field) {
+        if (entity == null) return null;
+        try {
+            var method = entity.getClass()
+                    .getMethod("get" + Character.toUpperCase(field.charAt(0))
+                            + field.substring(1));
+            Object val = method.invoke(entity);
+            if (val == null) return null;
+            return ((java.math.BigDecimal) val).doubleValue();
+        } catch (Exception e) {
+            return null;
+        }
     }
 }
